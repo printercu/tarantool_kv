@@ -19,10 +19,6 @@ box.once('bootstrap', function()
 end)
 
 local function readValue(request)
-  local authResponse = authorizeRequest(request)
-  if authResponse ~= nil then
-    return authResponse
-  end
   local key = request:stash('key')
   local value = box.space.store:get(key)
   if value == nil then
@@ -33,10 +29,6 @@ local function readValue(request)
 end
 
 local function writeValue(request)
-  local authResponse = authorizeRequest(request)
-  if authResponse ~= nil then
-    return authResponse
-  end
   local key = request:stash('key')
   local content = request:read()
   box.space.store:upsert({key, content}, {{'=', 2, content}})
@@ -44,35 +36,34 @@ local function writeValue(request)
 end
 
 local function deleteValue(request)
-  local authResponse = authorizeRequest(request)
-  if authResponse ~= nil then
-    return authResponse
-  end
   local key = request:stash('key')
   box.space.store:delete({key})
   return {status = 204}
 end
 
-function authorizeRequest(request)
-  header = request.headers['authorization']
-  if header == nil then
-    return {
-      status = 401,
-      body = '{"error":"Unauthorized"}',
-      headers = { ['WWW-Authenticate'] = 'Bearer realm=' .. HTTP_REALM }
-    }
-  end
-  _, _, token = header:find('Bearer%s+(.+)')
-  if token == nil or box.space.auth:get(token) == nil then
-    return {
-      status = 403,
-      body = '{"error":"Forbidden"}',
-    }
+function withAuthorization(callback)
+  return function(request)
+    header = request.headers['authorization']
+    if header == nil then
+      return {
+        status = 401,
+        body = '{"error":"Unauthorized"}',
+        headers = { ['WWW-Authenticate'] = 'Bearer realm=' .. HTTP_REALM }
+      }
+    end
+    _, _, token = header:find('Bearer%s+(.+)')
+    if token == nil or box.space.auth:get(token) == nil then
+      return {
+        status = 403,
+        body = '{"error":"Forbidden"}',
+      }
+    end
+    return callback(request)
   end
 end
 
 local httpd = require('http.server').new(HTTP_HOST, HTTP_PORT)
-httpd:route({path = '/:key', method = 'GET'}, readValue)
-httpd:route({path = '/:key', method = 'POST'}, writeValue)
-httpd:route({path = '/:key', method = 'DELETE'}, deleteValue)
+httpd:route({path = '/:key', method = 'GET'}, withAuthorization(readValue))
+httpd:route({path = '/:key', method = 'POST'}, withAuthorization(writeValue))
+httpd:route({path = '/:key', method = 'DELETE'}, withAuthorization(deleteValue))
 httpd:start()
