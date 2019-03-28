@@ -11,22 +11,37 @@ RSpec.describe 'Server' do
     http.send_request(method.upcase, path, data, header.merge(default_header))
   end
 
+  def assert_json_response(data)
+    expect(subject).to include('content-type' => ['application/json'])
+    expect(JSON.load(subject.body)).to eq(data)
+  end
+
   shared_examples 'authorization' do
     context 'without auth headers' do
       let(:default_header) { {} }
-      it { should be_instance_of(Net::HTTPUnauthorized) }
+      it do
+        should be_instance_of(Net::HTTPUnauthorized)
+        assert_json_response('error' => 'Unauthorized')
+        expect(subject).to include('www-authenticate' => ['Bearer realm=app'])
+      end
     end
 
     context 'with invalid token' do
       let(:token) { 'invalid' }
-      it { should be_instance_of(Net::HTTPForbidden) }
+      it do
+        should be_instance_of(Net::HTTPForbidden)
+        assert_json_response('error' => 'Forbidden')
+      end
     end
   end
 
   describe 'GET' do
     subject { request(:get, '/missing') }
     include_examples 'authorization'
-    it { should be_instance_of(Net::HTTPNotFound) }
+    it do
+      should be_instance_of(Net::HTTPNotFound)
+      assert_json_response('error' => 'Not found')
+    end
   end
 
   describe 'DELETE' do
@@ -38,7 +53,10 @@ RSpec.describe 'Server' do
   describe 'POST' do
     subject { request(:post, '/test_create', data: {test: :value}) }
     include_examples 'authorization'
-    it { should be_instance_of(Net::HTTPOK) }
+    it do
+      should be_instance_of(Net::HTTPOK)
+      assert_json_response({})
+    end
   end
 
   describe 'storing data' do

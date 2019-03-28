@@ -22,17 +22,19 @@ local function readValue(request)
   local key = request:stash('key')
   local value = box.space.store:get(key)
   if value == nil then
-    return {status = 404, body = '{"error":"Not found"}'}
+    return jsonResponse(404, '{"error":"Not found"}')
   else
+    -- TODO: change to jsonResponse when writeValue validates for valid json
     return {status = 200, body = value.content}
   end
 end
 
+-- TODO: validate for json content. Try request:json()
 local function writeValue(request)
   local key = request:stash('key')
   local content = request:read()
   box.space.store:upsert({key, content}, {{'=', 2, content}})
-  return {status = 200}
+  return jsonResponse(200, '{}')
 end
 
 local function deleteValue(request)
@@ -41,25 +43,28 @@ local function deleteValue(request)
   return {status = 204}
 end
 
-function withAuthorization(callback)
+local function withAuthorization(callback)
   return function(request)
     header = request.headers['authorization']
     if header == nil then
-      return {
-        status = 401,
-        body = '{"error":"Unauthorized"}',
-        headers = { ['WWW-Authenticate'] = 'Bearer realm=' .. HTTP_REALM }
-      }
+      return jsonResponse(401, '{"error":"Unauthorized"}', {
+        ['WWW-Authenticate'] = 'Bearer realm=' .. HTTP_REALM
+      })
     end
     _, _, token = header:find('Bearer%s+(.+)')
     if token == nil or box.space.auth:get(token) == nil then
-      return {
-        status = 403,
-        body = '{"error":"Forbidden"}',
-      }
+      return jsonResponse(403, '{"error":"Forbidden"}')
     end
     return callback(request)
   end
+end
+
+function jsonResponse(status, body, headers)
+  local responseHeaders = {['Content-Type'] = 'application/json'}
+  if headers then
+    for k, v in pairs(headers) do responseHeaders[k] = v end
+  end
+  return {status = status, body = body, headers = responseHeaders}
 end
 
 local httpd = require('http.server').new(HTTP_HOST, HTTP_PORT)
